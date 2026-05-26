@@ -1,0 +1,23 @@
+# Python / 本地服务
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+server/.env
+
+# 文档生成与临时文件
+docs/_report_analysis.json
+docs/_diagrams/
+*.tmp
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 大体积数据（勿提交到公开仓库）
+*.xlsx
+*.pdf
+*.docx
+assets/
