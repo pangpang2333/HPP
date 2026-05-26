@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>聚典核校用户反馈大屏</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="icon" href="./logo.svg" type="image/svg+xml" />
+  </head>
+  <body class="board-in-page">
+    <header class="top">
+      <a class="top-brand" href="#admin" id="brandHome" title="返回管理">
+        <img class="top-brand-logo" src="./logo.svg" width="40" height="40" alt="" />
+        <div class="top-brand-text">
+          <span class="top-brand-name">聚典核校</span>
+          <span class="top-brand-tagline">用户反馈大屏</span>
+        </div>
+      </a>
+      <nav>
+        <button type="button" class="btn active-tab" id="tabAdmin" data-view="admin">管理</button>
+        <button type="button" class="btn" id="tabBoard" data-view="board">展示大屏</button>
+        <a class="btn btn-ghost" href="./review/" id="linkPdfReview" title="需本机启动 server（GitHub Pages 在线版不可用）">审校PDF分析</a>
+        <button type="button" class="btn btn-ghost" id="btnReload">从本机重新加载</button>
+      </nav>
+    </header>
+
+    <div id="view-admin" class="view active">
+      <div class="admin-subtabs">
+        <button type="button" class="btn admin-subtab active" data-admin-tab="feed">添加与列表</button>
+        <button type="button" class="btn admin-subtab" data-admin-tab="positive">正向反馈</button>
+        <button type="button" class="btn admin-subtab" data-admin-tab="other">其他需求</button>
+        <button type="button" class="btn admin-subtab" data-admin-tab="settings">展示设置</button>
+      </div>
+
+      <main class="layout layout-admin">
+        <div id="admin-panel-feed" class="admin-tab-panel active">
+          <div class="admin-feed-split">
+            <div class="admin-feed-main">
+              <section class="panel panel-upload">
+                <h2>添加截图</h2>
+                <p class="muted" style="margin: 0 0 10px; font-size: 0.9rem">
+                  在下方条内点击后 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴截图（或拖入图片）。保存后在列表中手动选择分类、填写备注（输入后自动保存）。预览图可<strong>双击放大</strong>查看。
+                </p>
+                <div
+                  id="pasteZone"
+                  class="paste-zone paste-zone-compact"
+                  tabindex="0"
+                  role="button"
+                  aria-label="粘贴截图"
+                >
+                  <div class="paste-zone-inner">
+                    <span class="paste-compact-text">点此聚焦 · <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴 · 可拖入图片</span>
+                  </div>
+                </div>
+
+                <h2 style="margin-top: 28px">全部反馈</h2>
+                <div class="table-wrap">
+                  <table class="feedback-table">
+                    <thead>
+                      <tr>
+                        <th class="fb-th-preview">预览</th>
+                        <th class="fb-th-cat">分类</th>
+                        <th class="fb-th-resolve">状态</th>
+                        <th class="fb-th-time">时间</th>
+                        <th class="fb-th-note">备注</th>
+                        <th class="fb-th-act"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="fbRows"></tbody>
+                  </table>
+                </div>
+                <p class="muted" style="margin-top: 12px; font-size: 0.85rem">
+                  数据保存在本机浏览器 <strong>IndexedDB</strong>（<code>feedback-dashboard-offline</code>）。换浏览器或清除站点数据会丢失。
+                </p>
+              </section>
+            </div>
+
+            <aside class="admin-feed-sidebar panel">
+              <h2>分类管理</h2>
+              <p class="muted sidebar-hint">名称、颜色在失焦或更改后自动保存；新分类颜色系统自动推荐（可改）；列表按创建时间倒序。删除分类需确认。</p>
+              <form id="formCat" class="row form-cat-sidebar">
+                <label class="field">
+                  名称
+                  <input type="text" id="newCatName" placeholder="新分类名称" />
+                </label>
+                <label class="field">
+                  颜色
+                  <input type="color" id="newCatColor" value="#0ea5e9" />
+                </label>
+                <button type="submit" class="btn btn-primary">添加分类</button>
+              </form>
+              <div class="table-wrap cat-table-wrap">
+                <table class="cat-admin-table">
+                  <thead>
+                    <tr>
+                      <th>名称</th>
+                      <th>颜色</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="catRows"></tbody>
+                </table>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <div id="admin-panel-positive" class="admin-tab-panel">
+          <section class="panel panel-upload">
+            <h2>正向反馈 · 添加截图</h2>
+            <p class="muted" style="margin: 0 0 10px; font-size: 0.9rem">
+              与问题反馈分开记录。点击下方条后 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴或拖入图片；列表仅含预览、时间与备注（无分类与状态）。预览可<strong>双击放大</strong>。
+            </p>
+            <div
+              id="pasteZonePositive"
+              class="paste-zone paste-zone-compact"
+              tabindex="0"
+              role="button"
+              aria-label="粘贴正向反馈截图"
+            >
+              <div class="paste-zone-inner">
+                <span class="paste-compact-text">点此聚焦 · <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴 · 可拖入图片</span>
+              </div>
+            </div>
+            <h2 style="margin-top: 28px">正向反馈列表</h2>
+            <div class="table-wrap positive-table-wrap">
+              <table class="positive-table">
+                <thead>
+                  <tr>
+                    <th class="pf-th-preview">预览</th>
+                    <th class="pf-th-time">时间</th>
+                    <th class="pf-th-note">备注</th>
+                    <th class="pf-th-act"></th>
+                  </tr>
+                </thead>
+                <tbody id="pfRows"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="admin-panel-other" class="admin-tab-panel">
+          <section class="panel">
+            <h2>其他需求</h2>
+            <p class="muted other-needs-intro">
+              与截图反馈分开记录的文字备忘：填写需求类型、需求内容与解决方案（输入后自动保存）。<strong>不会</strong>出现在<span class="nowrap-phrase">展示大屏</span>。
+            </p>
+            <p style="margin: 0 0 12px">
+              <button type="button" class="btn btn-primary" id="btnAddOtherNeed">添加一条</button>
+            </p>
+            <div class="table-wrap other-needs-wrap">
+              <table class="other-needs-table">
+                <colgroup>
+                  <col class="on-col-type" />
+                  <col class="on-col-content" />
+                  <col class="on-col-solution" />
+                  <col class="on-col-act" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th class="on-th-type">需求类型</th>
+                    <th class="on-th-content">需求内容</th>
+                    <th class="on-th-solution">解决方案</th>
+                    <th class="on-th-act"></th>
+                  </tr>
+                </thead>
+                <tbody id="otherNeedRows"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="admin-panel-settings" class="admin-tab-panel">
+          <section class="panel">
+            <h2>大屏展示设置</h2>
+            <p class="muted" style="margin-top: 0">修改后自动保存。</p>
+            <div class="row">
+              <label class="field">
+                每行列数
+                <input type="number" id="setCols" min="2" max="8" />
+              </label>
+              <label class="field">
+                卡片高度
+                <select id="setCardSize">
+                  <option value="small">小</option>
+                  <option value="medium">中</option>
+                  <option value="large">大</option>
+                </select>
+              </label>
+              <label class="field">
+                主题
+                <select id="setTheme">
+                  <option value="dark">深色</option>
+                  <option value="light">浅色</option>
+                </select>
+              </label>
+              <label class="field" style="flex-direction: row; align-items: center; gap: 8px; min-width: auto">
+                <input type="checkbox" id="setShowNotes" />
+                大屏显示备注
+              </label>
+            </div>
+          </section>
+
+          <section class="panel data-backup-panel">
+            <h2>数据备份与迁移</h2>
+            <p class="muted data-backup-hint">
+              反馈、截图、分类等保存在<strong>当前浏览器</strong>的 IndexedDB 里，不在项目文件夹中。换网址（如 GitHub Pages）或换浏览器会看不到旧数据，请先用本机<strong>导出</strong>，再在目标页面<strong>导入</strong>。
+            </p>
+            <div class="row data-backup-actions">
+              <button type="button" class="btn btn-primary" id="btnExportData">导出全部数据（JSON）</button>
+              <label class="btn btn-ghost data-import-label">
+                选择文件导入
+                <input type="file" id="inputImportData" accept=".json,application/json" hidden />
+              </label>
+            </div>
+            <label class="field data-import-mode">
+              <input type="radio" name="importMode" value="merge" checked />
+              合并导入（同 ID 以文件为准，其余保留）
+            </label>
+            <label class="field data-import-mode">
+              <input type="radio" name="importMode" value="replace" />
+              覆盖导入（清空当前浏览器内全部数据后写入）
+            </label>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div id="view-board" class="view">
+      <div class="board-header">
+        <div class="board-header-bar">
+          <span id="statTotal" class="board-stat-only">共 0 条</span>
+          <div class="board-toolbar board-toolbar-strip">
+            <span class="board-toolbar-hint">展示选项</span>
+            <div class="board-toolbar-toggles">
+              <label class="board-ctl" title="勾选后按分类默认顺序归并，同一分类的卡片排在一起">
+                <input type="checkbox" id="boardGroupByCategory" />
+                <span class="board-ctl-text">按分类合并</span>
+                <span class="board-ctl-sub">同分类相邻</span>
+              </label>
+              <label class="board-ctl" title="关闭后以纯文字列表展示，适合汇报扫读">
+                <input type="checkbox" id="boardShowScreenshots" checked />
+                <span class="board-ctl-text">显示截图</span>
+              </label>
+              <label class="board-ctl" title="勾选后隐藏「已处理」">
+                <input type="checkbox" id="boardHideResolved" />
+                <span class="board-ctl-text">隐藏已处理</span>
+                <span class="board-ctl-sub">只看待处理 / 处理中</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="grid" class="board-grid cols-4"></div>
+      <div id="empty" class="empty-board" style="display: none">暂无反馈，请切换到「管理」→「添加与列表」粘贴截图。</div>
+    </div>
+
+    <div id="imgLightbox" class="img-lightbox" role="dialog" aria-modal="true" aria-hidden="true">
+      <div class="img-lightbox-backdrop" id="imgLightboxBackdrop"></div>
+      <div class="img-lightbox-inner">
+        <button type="button" class="btn img-lightbox-close" id="imgLightboxClose">关闭</button>
+        <img id="imgLightboxImg" class="img-lightbox-img" src="" alt="大图预览" />
+      </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+    <script>
+      (function () {
+        var a = document.getElementById("linkPdfReview");
+        if (a && location.protocol === "file:") a.setAttribute("href", "review/index.html");
+      })();
+    </script>
+    <script src="./app.js"></script>
+  </body>
+</html>
