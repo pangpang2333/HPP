@@ -855,6 +855,63 @@ body.board-in-page {
   gap: 14px 20px;
 }
 
+.board-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 6px 10px 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  background: rgba(0, 0, 0, 0.32);
+  min-width: 200px;
+  max-width: min(280px, 100%);
+}
+
+.theme-light .board-search {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(14, 165, 233, 0.35);
+}
+
+.board-search-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.board-search-input {
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-family: inherit;
+  outline: none;
+  padding: 2px 0;
+}
+
+.board-search-input::placeholder {
+  color: var(--muted);
+}
+
+.board-search-input::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .board-search {
+    margin-left: 0;
+    width: 100%;
+    max-width: none;
+    order: 3;
+  }
+}
+
 .board-stat-only {
   font-size: 1.05rem;
   font-weight: 700;
