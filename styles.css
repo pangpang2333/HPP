@@ -271,6 +271,39 @@ table.cat-admin-table .btn-del-cat {
   font-weight: 600;
 }
 
+.data-backup-panel {
+  margin-top: 20px;
+}
+
+.data-backup-hint {
+  margin: 0 0 14px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  max-width: 720px;
+}
+
+.data-backup-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.data-import-label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.data-import-mode {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: auto;
+  margin: 4px 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

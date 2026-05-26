@@ -200,6 +200,28 @@
               </label>
             </div>
           </section>
+
+          <section class="panel data-backup-panel">
+            <h2>数据备份与迁移</h2>
+            <p class="muted data-backup-hint">
+              反馈、截图、分类等保存在<strong>当前浏览器</strong>的 IndexedDB 里，不在项目文件夹中。换网址（如 GitHub Pages）或换浏览器会看不到旧数据，请先用本机<strong>导出</strong>，再在目标页面<strong>导入</strong>。
+            </p>
+            <div class="row data-backup-actions">
+              <button type="button" class="btn btn-primary" id="btnExportData">导出全部数据（JSON）</button>
+              <label class="btn btn-ghost data-import-label">
+                选择文件导入
+                <input type="file" id="inputImportData" accept=".json,application/json" hidden />
+              </label>
+            </div>
+            <label class="field data-import-mode">
+              <input type="radio" name="importMode" value="merge" checked />
+              合并导入（同 ID 以文件为准，其余保留）
+            </label>
+            <label class="field data-import-mode">
+              <input type="radio" name="importMode" value="replace" />
+              覆盖导入（清空当前浏览器内全部数据后写入）
+            </label>
+          </section>
         </div>
       </main>
     </div>

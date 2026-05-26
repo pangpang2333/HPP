@@ -4,6 +4,8 @@
   const DB_NAME = "feedback-dashboard-offline";
   const DB_VERSION = 3;
   const CONFIG_KEY = "main";
+  const BACKUP_FORMAT = "feedback-dashboard-backup";
+  const BACKUP_VERSION = 1;
 
   let dbPromise = null;
   let state = { categories: [], settings: {}, feedback: [], positiveFeedback: [], otherNeeds: [] };
@@ -246,6 +248,182 @@
 
   async function deleteOtherNeed(db, id) {
     return idbTx(db, ["otherNeeds"], "readwrite", (tx) => tx.objectStore("otherNeeds").delete(id));
+  }
+
+  async function clearObjectStore(db, storeName) {
+    if (!db.objectStoreNames.contains(storeName)) return;
+    return idbTx(db, [storeName], "readwrite", (tx) => tx.objectStore(storeName).clear());
+  }
+
+  function downloadJsonFile(obj, filename) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function backupFilename() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp =
+      d.getFullYear() +
+      pad(d.getMonth() + 1) +
+      pad(d.getDate()) +
+      "-" +
+      pad(d.getHours()) +
+      pad(d.getMinutes());
+    return "聚典核校反馈备份-" + stamp + ".json";
+  }
+
+  async function buildBackupPayload() {
+    const db = await openDb();
+    const doc = await ensureConfig(db);
+    const payload = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      origin: location.href,
+      config: {
+        id: CONFIG_KEY,
+        categories: doc.categories,
+        settings: doc.settings,
+      },
+      feedback: await getAllItems(db),
+      positiveFeedback: db.objectStoreNames.contains("positiveItems") ? await getAllPositive(db) : [],
+      otherNeeds: db.objectStoreNames.contains("otherNeeds") ? await getAllOtherNeeds(db) : [],
+    };
+    return payload;
+  }
+
+  function parseBackupJson(text) {
+    let raw;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      throw new Error("不是有效的 JSON 文件");
+    }
+    if (!raw || raw.format !== BACKUP_FORMAT) {
+      throw new Error("不是本系统的备份文件（缺少 format 标识）");
+    }
+    if (raw.version !== BACKUP_VERSION) {
+      throw new Error("备份版本不兼容：" + raw.version);
+    }
+    if (!raw.config || !Array.isArray(raw.feedback)) {
+      throw new Error("备份内容不完整");
+    }
+    return raw;
+  }
+
+  async function importBackupPayload(payload, mode) {
+    const replace = mode === "replace";
+    if (replace) {
+      const ok = confirm(
+        "覆盖导入将清空当前浏览器中的全部反馈、正向反馈、其他需求与分类设置，然后写入备份。确定继续？"
+      );
+      if (!ok) return { cancelled: true };
+    }
+    const db = await openDb();
+    const stores = ["config", "items"];
+    if (db.objectStoreNames.contains("positiveItems")) stores.push("positiveItems");
+    if (db.objectStoreNames.contains("otherNeeds")) stores.push("otherNeeds");
+
+    if (replace) {
+      await clearObjectStore(db, "items");
+      if (db.objectStoreNames.contains("positiveItems")) await clearObjectStore(db, "positiveItems");
+      if (db.objectStoreNames.contains("otherNeeds")) await clearObjectStore(db, "otherNeeds");
+    }
+
+    const cfg = payload.config;
+    await putConfigDoc(db, {
+      id: CONFIG_KEY,
+      categories: Array.isArray(cfg.categories) ? cfg.categories : defaultConfigBody().categories,
+      settings: cfg.settings && typeof cfg.settings === "object" ? cfg.settings : defaultConfigBody().settings,
+    });
+
+    const feedback = Array.isArray(payload.feedback) ? payload.feedback : [];
+    const positive = Array.isArray(payload.positiveFeedback) ? payload.positiveFeedback : [];
+    const other = Array.isArray(payload.otherNeeds) ? payload.otherNeeds : [];
+
+    for (const item of feedback) {
+      if (item && item.id) await putItem(db, item);
+    }
+    if (db.objectStoreNames.contains("positiveItems")) {
+      for (const p of positive) {
+        if (p && p.id) await putPositiveItem(db, p);
+      }
+    }
+    if (db.objectStoreNames.contains("otherNeeds")) {
+      for (const o of other) {
+        if (o && o.id) await putOtherNeed(db, o);
+      }
+    }
+
+    await loadState();
+    return {
+      cancelled: false,
+      counts: { feedback: feedback.length, positive: positive.length, otherNeeds: other.length },
+    };
+  }
+
+  async function exportAllData() {
+    const payload = await buildBackupPayload();
+    downloadJsonFile(payload, backupFilename());
+    toast(
+      "已导出：反馈 " +
+        payload.feedback.length +
+        " 条，正向 " +
+        payload.positiveFeedback.length +
+        " 条，其他需求 " +
+        payload.otherNeeds.length +
+        " 条"
+    );
+  }
+
+  function bindDataBackupControls() {
+    const btnExport = document.getElementById("btnExportData");
+    const inputImport = document.getElementById("inputImportData");
+    if (btnExport) {
+      btnExport.addEventListener("click", () => {
+        exportAllData().catch((e) => toast(String(e.message || e)));
+      });
+    }
+    if (inputImport) {
+      inputImport.addEventListener("change", async () => {
+        const file = inputImport.files && inputImport.files[0];
+        inputImport.value = "";
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const payload = parseBackupJson(text);
+          const modeEl = document.querySelector('input[name="importMode"]:checked');
+          const mode = modeEl ? modeEl.value : "merge";
+          const result = await importBackupPayload(payload, mode);
+          if (result.cancelled) return;
+          renderAdminFromState();
+          if (document.getElementById("view-board").classList.contains("active")) {
+            applyTheme();
+            renderBoard();
+          }
+          toast(
+            "导入完成：反馈 " +
+              result.counts.feedback +
+              " 条，正向 " +
+              result.counts.positive +
+              " 条，其他需求 " +
+              result.counts.otherNeeds +
+              " 条"
+          );
+        } catch (e) {
+          toast(String(e.message || e));
+        }
+      });
+    }
   }
 
   async function ensureConfig(db) {
@@ -1589,6 +1767,7 @@
     .then(() => {
       renderAdminFromState();
       bindSettingsAutoSave();
+      bindDataBackupControls();
       bindBoardToolbar();
       bindImageLightbox();
       applyHash();
