@@ -1574,8 +1574,10 @@
       card.className = "card " + size;
 
       const im = document.createElement("img");
+      im.className = "board-card-img";
       im.src = f.imageDataUrl || "";
       im.alt = "反馈截图";
+      im.title = "双击全屏查看";
       im.loading = "lazy";
       im.addEventListener("load", scheduleBoardMasonry);
       card.appendChild(im);
@@ -1658,6 +1660,17 @@
       posPanel.addEventListener("dblclick", (e) => {
         const t = e.target;
         if (t && t.tagName === "IMG" && t.classList.contains("thumb-pf")) {
+          openLb(t.getAttribute("src") || t.src);
+        }
+      });
+    }
+    const board = document.getElementById("view-board");
+    if (board && !board._lbBound) {
+      board._lbBound = true;
+      board.addEventListener("dblclick", (e) => {
+        const t = e.target;
+        if (t && t.tagName === "IMG" && t.classList.contains("board-card-img")) {
+          e.preventDefault();
           openLb(t.getAttribute("src") || t.src);
         }
       });

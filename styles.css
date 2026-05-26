@@ -1180,6 +1180,14 @@ body.board-in-page {
   background: var(--surface2);
 }
 
+#view-board .card img.board-card-img {
+  cursor: zoom-in;
+}
+
+#view-board .card img.board-card-img:active {
+  opacity: 0.92;
+}
+
 .card.small img {
   max-height: 140px;
   object-fit: cover;
