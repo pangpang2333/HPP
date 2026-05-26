@@ -1,4 +1,4 @@
-# 将反馈大屏静态页发布到 GitHub Pages（仅 index.html / app.js / styles.css / logo.svg）
+# 发布到 gh-pages 分支（在仓库 Settings → Pages 选「Deploy from branch」→ gh-pages / root）
 name: Deploy GitHub Pages
 
 on:
@@ -7,9 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -18,23 +16,18 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
       - name: 打包静态站点
         run: |
-          mkdir -p _site
-          cp index.html app.js styles.css logo.svg _site/
-          cp .nojekyll _site/ 2>/dev/null || touch _site/.nojekyll
+          mkdir -p public
+          cp index.html app.js styles.css logo.svg .nojekyll public/
+          touch public/.nojekyll
 
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
+      - name: 发布到 gh-pages 分支
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
-          path: _site
-
-      - uses: actions/deploy-pages@v4
-        id: deployment
+          branch: gh-pages
+          folder: public
+          clean: true

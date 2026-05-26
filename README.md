@@ -8,9 +8,9 @@
 
 `https://<你的GitHub用户名>.github.io/<仓库名>/`
 
-例如仓库名为 `feedback-dashboard`：
+本仓库 **HPP** 的地址为：
 
-`https://zhangsan.github.io/feedback-dashboard/`
+**https://pangpang2333.github.io/HPP/**
 
 > 换浏览器或清除站点数据后，反馈记录不会同步；公开仓库请勿上传含隐私的截图。
 
@@ -40,14 +40,14 @@ git push -u origin main
 
 首次 `git push` 会要求登录 GitHub（浏览器或 Personal Access Token）。
 
-### 3. 开启 GitHub Pages
+### 3. 开启 GitHub Pages（首次必做）
 
 1. 打开仓库 → **Settings** → **Pages**
-2. **Build and deployment** → **Source** 选 **GitHub Actions**
-3. 推送 `main` 分支后，Actions 会自动运行 **Deploy GitHub Pages** 工作流
-4. 约 1～2 分钟后，Pages 页面会显示站点 URL
+2. **Build and deployment** → **Source** 选 **Deploy from a branch**
+3. **Branch** 选 **gh-pages**，文件夹选 **/ (root)**，点 **Save**
+4. 推送 `main` 后 Actions 会把静态文件发布到 `gh-pages` 分支；约 1～2 分钟后可访问站点 URL
 
-也可在 **Actions** 标签页查看部署是否成功（绿色勾）。
+也可在 **Actions** 标签页查看 **Deploy GitHub Pages** 是否成功（绿色勾）。
 
 ### 4. 之后更新网站
 
