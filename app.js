@@ -1624,10 +1624,6 @@
   document.getElementById("tabAdmin").addEventListener("click", () => setView("admin"));
   document.getElementById("tabBoard").addEventListener("click", () => setView("board"));
 
-  document.getElementById("btnReload").addEventListener("click", () => {
-    refreshAll().catch((e) => toast(String(e.message || e)));
-  });
-
   window.addEventListener(
     "paste",
     (e) => {

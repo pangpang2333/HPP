@@ -19,8 +19,6 @@
       <nav>
         <button type="button" class="btn active-tab" id="tabAdmin" data-view="admin">管理</button>
         <button type="button" class="btn" id="tabBoard" data-view="board">展示大屏</button>
-        <a class="btn btn-ghost" href="./review/" id="linkPdfReview" title="需本机启动 server（GitHub Pages 在线版不可用）">审校PDF分析</a>
-        <button type="button" class="btn btn-ghost" id="btnReload">从本机重新加载</button>
       </nav>
     </header>
 
@@ -69,9 +67,6 @@
                     <tbody id="fbRows"></tbody>
                   </table>
                 </div>
-                <p class="muted" style="margin-top: 12px; font-size: 0.85rem">
-                  数据保存在本机浏览器 <strong>IndexedDB</strong>（<code>feedback-dashboard-offline</code>）。换浏览器或清除站点数据会丢失。
-                </p>
               </section>
             </div>
 
@@ -264,12 +259,6 @@
     </div>
 
     <div id="toast" class="toast"></div>
-    <script>
-      (function () {
-        var a = document.getElementById("linkPdfReview");
-        if (a && location.protocol === "file:") a.setAttribute("href", "review/index.html");
-      })();
-    </script>
     <script src="./app.js"></script>
   </body>
 </html>
