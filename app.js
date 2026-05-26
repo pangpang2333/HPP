@@ -1130,6 +1130,17 @@
     chkImg.addEventListener("change", scheduleBoardToolbarSave);
     if (chkRes) chkRes.addEventListener("change", scheduleBoardToolbarSave);
     if (chkGrp) chkGrp.addEventListener("change", scheduleBoardToolbarSave);
+
+    const search = document.getElementById("boardSearch");
+    if (search && !search._boardBound) {
+      search._boardBound = true;
+      search.addEventListener("input", () => {
+        if (document.getElementById("view-board").classList.contains("active")) renderBoard();
+      });
+      search.addEventListener("search", () => {
+        if (document.getElementById("view-board").classList.contains("active")) renderBoard();
+      });
+    }
   }
 
   function renderFeedback() {
@@ -1425,6 +1436,23 @@
     return "cols-" + c;
   }
 
+  function getBoardSearchRaw() {
+    const el = document.getElementById("boardSearch");
+    return el ? String(el.value || "").trim() : "";
+  }
+
+  function getBoardSearchQuery() {
+    return getBoardSearchRaw().toLowerCase();
+  }
+
+  function feedbackMatchesBoardSearch(f, query) {
+    if (!query) return true;
+    const cat = catById(f.categoryId);
+    const catName = (cat ? cat.name : "未分类").toLowerCase();
+    const note = String(f.note || "").toLowerCase();
+    return catName.indexOf(query) !== -1 || note.indexOf(query) !== -1;
+  }
+
   function renderBoard() {
     const grid = document.getElementById("grid");
     const empty = document.getElementById("empty");
@@ -1444,18 +1472,31 @@
     if (chkRes) chkRes.checked = hideResolved;
     if (chkGrp) chkGrp.checked = groupByCat;
 
+    const searchRaw = getBoardSearchRaw();
+    const searchQ = searchRaw.toLowerCase();
     let list = state.feedback || [];
     if (hideResolved) {
       list = list.filter((f) => normalizeResolveStatus(f.resolveStatus) !== RESOLVE_STATUS.resolved);
+    }
+    const listBeforeSearch = list.length;
+    if (searchQ) {
+      list = list.filter((f) => feedbackMatchesBoardSearch(f, searchQ));
     }
     list = orderFeedbackForBoard(list, groupByCat);
 
     const stat = document.getElementById("statTotal");
     if (stat) {
-      let t = "共 " + list.length + " 条";
+      let t;
+      if (searchQ) {
+        t = "命中 " + list.length + " 条";
+        if (listBeforeSearch !== list.length) t += "（筛选前 " + listBeforeSearch + " 条）";
+      } else {
+        t = "共 " + list.length + " 条";
+      }
       if (groupByCat) t += " · 已按分类归并";
       if (hideResolved) t += " · 已隐藏已处理";
       if (!showThumbs) t += " · 文字列表";
+      if (searchRaw) t += " · 检索「" + searchRaw + "」";
       stat.textContent = t;
     }
 
@@ -1470,9 +1511,15 @@
       grid.style.minHeight = "";
       if (empty) {
         empty.style.display = "block";
-        empty.textContent = hideResolved
-          ? "当前条件下暂无条目（可能均已处理）。可取消「隐藏已处理」或到「管理」添加反馈。"
-          : "暂无反馈，请切换到「管理」→「添加与列表」粘贴截图。";
+        if (searchQ) {
+          empty.textContent =
+            "没有匹配「" + searchRaw + "」的反馈（检索范围：分类、备注）。请换关键词或调整展示选项。";
+        } else if (hideResolved) {
+          empty.textContent =
+            "当前条件下暂无条目（可能均已处理）。可取消「隐藏已处理」或到「管理」添加反馈。";
+        } else {
+          empty.textContent = "暂无反馈，请切换到「管理」→「添加与列表」粘贴截图。";
+        }
       }
       return;
     }
