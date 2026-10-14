@@ -83,12 +83,136 @@
     return supabaseClient;
   }
 
+
+  let appReady = false;
+  let authForcedOut = false;
+
+  function isAuthError(err) {
+    if (!err) return false;
+    const status = err.status || err.statusCode || err.code;
+    const msg = String(
+      err.message || err.error_description || err.details || err.hint || err.error || ""
+    ).toLowerCase();
+    if (status === 401 || status === "401" || status === 403 || status === "403") return true;
+    if (status === "PGRST301") return true;
+    if (
+      /jwt|unauthorized|not authenticated|session|login required|expired|invalid claim|permission denied|row-level security|rls/.test(
+        msg
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function setLoginError(msg) {
+    const el = document.getElementById("loginError");
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+  }
+
+  function showLoginGate() {
+    document.body.classList.add("app-locked");
+    const gate = document.getElementById("loginGate");
+    if (gate) gate.setAttribute("aria-hidden", "false");
+    const pw = document.getElementById("loginPassword");
+    if (pw) {
+      pw.value = "";
+      setTimeout(() => {
+        try {
+          pw.focus({ preventScroll: true });
+        } catch (_) {}
+      }, 50);
+    }
+  }
+
+  function hideLoginGate() {
+    document.body.classList.remove("app-locked");
+    const gate = document.getElementById("loginGate");
+    if (gate) gate.setAttribute("aria-hidden", "true");
+    setLoginError("");
+  }
+
+  async function getSession() {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const { data, error } = await sb.auth.getSession();
+      if (error) {
+        console.warn("getSession error", error);
+        return null;
+      }
+      return data && data.session ? data.session : null;
+    } catch (e) {
+      console.warn("getSession failed", e);
+      return null;
+    }
+  }
+
+  async function handleAuthFailure(err) {
+    if (authForcedOut) return;
+    authForcedOut = true;
+    const msg = err && (err.message || err.error_description || String(err));
+    toast("登录已失效，请重新登录" + (msg ? "：" + msg : ""));
+    try {
+      const sb = getSupabase();
+      if (sb) await sb.auth.signOut();
+    } catch (_) {}
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    appReady = false;
+    showLoginGate();
+    setTimeout(() => {
+      authForcedOut = false;
+    }, 800);
+  }
+
+  let uiControlsBound = false;
+
+  async function enterAppAfterAuth(opts) {
+    opts = opts || {};
+    hideLoginGate();
+    const pull = await pullCloudIntoLocal({ notify: !!opts.notifyPull });
+    if (!pull.ok && !pull.skipped && !pull.busy) {
+      if (isAuthError(pull.error)) {
+        await handleAuthFailure(pull.error);
+        return false;
+      }
+      console.warn("startup cloud pull failed, using local cache", pull.error);
+      if (opts.notifyPull) toast("云端暂时不可用，已使用本地缓存");
+    }
+    await loadState();
+    renderAdminFromState();
+    if (!uiControlsBound) {
+      bindSettingsAutoSave();
+      bindDataBackupControls();
+      bindBoardToolbar();
+      bindImageLightbox();
+      uiControlsBound = true;
+    }
+    applyHash();
+    appReady = true;
+    return true;
+  }
+
   function toastCloudOk() {
     clearTimeout(cloudToastTimer);
     cloudToastTimer = setTimeout(() => toast("已同步到云端"), 350);
   }
 
   function toastCloudErr(err) {
+    if (isAuthError(err)) {
+      handleAuthFailure(err);
+      return;
+    }
     const msg = err && (err.message || err.error_description || err.details || String(err));
     toast("云端同步失败：" + msg);
     console.warn("cloud sync error", err);
@@ -216,6 +340,10 @@
       await fn();
       toastCloudOk();
     } catch (e) {
+      if (isAuthError(e)) {
+        await handleAuthFailure(e);
+        return;
+      }
       toastCloudErr(e);
     }
   }
@@ -334,6 +462,10 @@
       };
     } catch (e) {
       console.warn("pullCloudIntoLocal failed", e);
+      if (isAuthError(e)) {
+        await handleAuthFailure(e);
+        return { ok: false, error: e, auth: true };
+      }
       if (opts.notifyError) toastCloudErr(e);
       return { ok: false, error: e };
     } finally {
@@ -2133,22 +2265,81 @@
 
   window.addEventListener("hashchange", applyHash);
 
+  async function doLogin(email, password) {
+    const sb = getSupabase();
+    if (!sb) throw new Error("未配置 Supabase，请检查 config.js");
+    const { data, error } = await sb.auth.signInWithPassword({
+      email: String(email || "").trim(),
+      password: String(password || ""),
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  async function doLogout() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    appReady = false;
+    try {
+      const sb = getSupabase();
+      if (sb) await sb.auth.signOut();
+    } catch (e) {
+      console.warn("signOut", e);
+    }
+    showLoginGate();
+    toast("已退出登录");
+  }
+
+  function bindAuthControls() {
+    const form = document.getElementById("loginForm");
+    if (form) {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const emailEl = document.getElementById("loginEmail");
+        const passEl = document.getElementById("loginPassword");
+        const btn = document.getElementById("loginSubmit");
+        const email = emailEl ? emailEl.value : "";
+        const password = passEl ? passEl.value : "";
+        setLoginError("");
+        if (btn) btn.disabled = true;
+        try {
+          await doLogin(email, password);
+          const ok = await enterAppAfterAuth({ notifyPull: true });
+          if (ok) toast("登录成功");
+        } catch (err) {
+          const msg =
+            (err && (err.message || err.error_description)) ||
+            "登录失败，请检查邮箱与密码";
+          setLoginError(String(msg));
+          toast("登录失败");
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      });
+    }
+    const logoutBtn = document.getElementById("btnLogout");
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", () => {
+        doLogout();
+      });
+    }
+  }
+
+  bindAuthControls();
+
   openDb()
     .then(async () => {
-      const pull = await pullCloudIntoLocal({ notify: true });
-      if (!pull.ok && !pull.skipped && !pull.busy) {
-        // keep local cache if cloud unreachable
-        console.warn("startup cloud pull failed, using local cache", pull.error);
+      const session = await getSession();
+      if (!session) {
+        showLoginGate();
+        return;
       }
-      await loadState();
+      await enterAppAfterAuth({ notifyPull: true });
     })
-    .then(() => {
-      renderAdminFromState();
-      bindSettingsAutoSave();
-      bindDataBackupControls();
-      bindBoardToolbar();
-      bindImageLightbox();
-      applyHash();
-    })
-    .catch((e) => toast("无法打开本地数据库：" + (e.message || String(e))));
+    .catch((e) => {
+      showLoginGate();
+      toast("无法打开本地数据库：" + (e.message || String(e)));
+    });
 })();
