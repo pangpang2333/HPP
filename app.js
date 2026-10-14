@@ -62,6 +62,418 @@
   let boardMasonryResizeBound = false;
   let boardToolbarTimer = null;
 
+
+  // ---- Supabase cloud sync (IndexedDB remains local cache) ----
+  let supabaseClient = null;
+  let cloudPullBusy = false;
+  let cloudToastTimer = null;
+  let lastCloudPullAt = 0;
+
+  function getSupabase() {
+    if (supabaseClient) return supabaseClient;
+    const cfg = window.FEEDBACK_DASH_SUPABASE || {};
+    if (!cfg.url || !cfg.anonKey) return null;
+    if (!window.supabase || typeof window.supabase.createClient !== "function") return null;
+    try {
+      supabaseClient = window.supabase.createClient(cfg.url, cfg.anonKey);
+    } catch (e) {
+      console.warn("supabase init failed", e);
+      return null;
+    }
+    return supabaseClient;
+  }
+
+
+  let appReady = false;
+  let authForcedOut = false;
+
+  function isAuthError(err) {
+    if (!err) return false;
+    const status = err.status || err.statusCode || err.code;
+    const msg = String(
+      err.message || err.error_description || err.details || err.hint || err.error || ""
+    ).toLowerCase();
+    if (status === 401 || status === "401" || status === 403 || status === "403") return true;
+    if (status === "PGRST301") return true;
+    if (
+      /jwt|unauthorized|not authenticated|session|login required|expired|invalid claim|permission denied|row-level security|rls/.test(
+        msg
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function setLoginError(msg) {
+    const el = document.getElementById("loginError");
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+  }
+
+  function showLoginGate() {
+    document.body.classList.add("app-locked");
+    const gate = document.getElementById("loginGate");
+    if (gate) gate.setAttribute("aria-hidden", "false");
+    const pw = document.getElementById("loginPassword");
+    if (pw) {
+      pw.value = "";
+      setTimeout(() => {
+        try {
+          pw.focus({ preventScroll: true });
+        } catch (_) {}
+      }, 50);
+    }
+  }
+
+  function hideLoginGate() {
+    document.body.classList.remove("app-locked");
+    const gate = document.getElementById("loginGate");
+    if (gate) gate.setAttribute("aria-hidden", "true");
+    setLoginError("");
+  }
+
+  async function getSession() {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const { data, error } = await sb.auth.getSession();
+      if (error) {
+        console.warn("getSession error", error);
+        return null;
+      }
+      return data && data.session ? data.session : null;
+    } catch (e) {
+      console.warn("getSession failed", e);
+      return null;
+    }
+  }
+
+  async function handleAuthFailure(err) {
+    if (authForcedOut) return;
+    authForcedOut = true;
+    const msg = err && (err.message || err.error_description || String(err));
+    toast("登录已失效，请重新登录" + (msg ? "：" + msg : ""));
+    try {
+      const sb = getSupabase();
+      if (sb) await sb.auth.signOut();
+    } catch (_) {}
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    appReady = false;
+    showLoginGate();
+    setTimeout(() => {
+      authForcedOut = false;
+    }, 800);
+  }
+
+  let uiControlsBound = false;
+
+  async function enterAppAfterAuth(opts) {
+    opts = opts || {};
+    hideLoginGate();
+    const pull = await pullCloudIntoLocal({ notify: !!opts.notifyPull });
+    if (!pull.ok && !pull.skipped && !pull.busy) {
+      if (isAuthError(pull.error)) {
+        await handleAuthFailure(pull.error);
+        return false;
+      }
+      console.warn("startup cloud pull failed, using local cache", pull.error);
+      if (opts.notifyPull) toast("云端暂时不可用，已使用本地缓存");
+    }
+    await loadState();
+    renderAdminFromState();
+    if (!uiControlsBound) {
+      bindSettingsAutoSave();
+      bindDataBackupControls();
+      bindBoardToolbar();
+      bindImageLightbox();
+      uiControlsBound = true;
+    }
+    applyHash();
+    appReady = true;
+    return true;
+  }
+
+  function toastCloudOk() {
+    clearTimeout(cloudToastTimer);
+    cloudToastTimer = setTimeout(() => toast("已同步到云端"), 350);
+  }
+
+  function toastCloudErr(err) {
+    if (isAuthError(err)) {
+      handleAuthFailure(err);
+      return;
+    }
+    const msg = err && (err.message || err.error_description || err.details || String(err));
+    toast("云端同步失败：" + msg);
+    console.warn("cloud sync error", err);
+  }
+
+  function feedbackToRow(item) {
+    return {
+      id: item.id,
+      image_data_url: item.imageDataUrl || null,
+      category_id: item.categoryId || null,
+      note: item.note || "",
+      created_at: item.createdAt || null,
+      resolve_status: item.resolveStatus || null,
+    };
+  }
+
+  function rowToFeedback(row) {
+    return {
+      id: row.id,
+      imageDataUrl: row.image_data_url || "",
+      categoryId: row.category_id || "",
+      note: row.note || "",
+      createdAt: row.created_at || new Date().toISOString(),
+      resolveStatus: row.resolve_status || RESOLVE_STATUS.unresolved,
+    };
+  }
+
+  function positiveToRow(item) {
+    return {
+      id: item.id,
+      image_data_url: item.imageDataUrl || null,
+      note: item.note || "",
+      created_at: item.createdAt || null,
+    };
+  }
+
+  function rowToPositive(row) {
+    return {
+      id: row.id,
+      imageDataUrl: row.image_data_url || "",
+      note: row.note || "",
+      createdAt: row.created_at || new Date().toISOString(),
+    };
+  }
+
+  function otherToRow(item) {
+    return {
+      id: item.id,
+      need_type: item.needType || "",
+      need_content: item.needContent || "",
+      solution: item.solution || "",
+      created_at: item.createdAt || null,
+    };
+  }
+
+  function rowToOther(row) {
+    return {
+      id: row.id,
+      needType: row.need_type || "",
+      needContent: row.need_content || "",
+      solution: row.solution || "",
+      createdAt: row.created_at || new Date().toISOString(),
+    };
+  }
+
+  async function cloudUpsertConfig(doc) {
+    const sb = getSupabase();
+    if (!sb || !doc) return;
+    const { error } = await sb.from("dashboard_config").upsert(
+      {
+        id: "default",
+        categories: Array.isArray(doc.categories) ? doc.categories : [],
+        settings: doc.settings && typeof doc.settings === "object" ? doc.settings : {},
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
+    if (error) throw error;
+  }
+
+  async function cloudUpsertFeedback(item) {
+    const sb = getSupabase();
+    if (!sb || !item || !item.id) return;
+    const { error } = await sb.from("feedback_items").upsert(feedbackToRow(item), { onConflict: "id" });
+    if (error) throw error;
+  }
+
+  async function cloudDeleteFeedback(id) {
+    const sb = getSupabase();
+    if (!sb || !id) return;
+    const { error } = await sb.from("feedback_items").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async function cloudUpsertPositive(item) {
+    const sb = getSupabase();
+    if (!sb || !item || !item.id) return;
+    const { error } = await sb.from("positive_feedback").upsert(positiveToRow(item), { onConflict: "id" });
+    if (error) throw error;
+  }
+
+  async function cloudDeletePositive(id) {
+    const sb = getSupabase();
+    if (!sb || !id) return;
+    const { error } = await sb.from("positive_feedback").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async function cloudUpsertOther(item) {
+    const sb = getSupabase();
+    if (!sb || !item || !item.id) return;
+    const { error } = await sb.from("other_needs").upsert(otherToRow(item), { onConflict: "id" });
+    if (error) throw error;
+  }
+
+  async function cloudDeleteOther(id) {
+    const sb = getSupabase();
+    if (!sb || !id) return;
+    const { error } = await sb.from("other_needs").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async function cloudAfterLocal(fn) {
+    try {
+      await fn();
+      toastCloudOk();
+    } catch (e) {
+      if (isAuthError(e)) {
+        await handleAuthFailure(e);
+        return;
+      }
+      toastCloudErr(e);
+    }
+  }
+
+  async function cloudClearAllTables() {
+    const sb = getSupabase();
+    if (!sb) return;
+    // delete all rows (open RLS); use neq impossible id to match all
+    const ops = [
+      sb.from("feedback_items").delete().neq("id", ""),
+      sb.from("positive_feedback").delete().neq("id", ""),
+      sb.from("other_needs").delete().neq("id", ""),
+    ];
+    for (const p of ops) {
+      const { error } = await p;
+      if (error) throw error;
+    }
+  }
+
+  async function cloudPushAllFromLocal(db) {
+    const sb = getSupabase();
+    if (!sb) return;
+    const doc = await getConfigDoc(db);
+    if (doc) await cloudUpsertConfig(doc);
+    const items = await getAllItems(db);
+    if (items.length) {
+      const { error } = await sb.from("feedback_items").upsert(items.map(feedbackToRow), { onConflict: "id" });
+      if (error) throw error;
+    }
+    if (db.objectStoreNames.contains("positiveItems")) {
+      const pos = await getAllPositive(db);
+      if (pos.length) {
+        const { error } = await sb.from("positive_feedback").upsert(pos.map(positiveToRow), { onConflict: "id" });
+        if (error) throw error;
+      }
+    }
+    if (db.objectStoreNames.contains("otherNeeds")) {
+      const other = await getAllOtherNeeds(db);
+      if (other.length) {
+        const { error } = await sb.from("other_needs").upsert(other.map(otherToRow), { onConflict: "id" });
+        if (error) throw error;
+      }
+    }
+  }
+
+  async function pullCloudIntoLocal(opts) {
+    opts = opts || {};
+    const sb = getSupabase();
+    if (!sb) return { ok: false, skipped: true };
+    if (cloudPullBusy) return { ok: false, busy: true };
+    cloudPullBusy = true;
+    try {
+      const [cfgRes, fbRes, posRes, onRes] = await Promise.all([
+        sb.from("dashboard_config").select("id,categories,settings").eq("id", "default").maybeSingle(),
+        sb.from("feedback_items").select("id,image_data_url,category_id,note,created_at,resolve_status"),
+        sb.from("positive_feedback").select("id,image_data_url,note,created_at"),
+        sb.from("other_needs").select("id,need_type,need_content,solution,created_at"),
+      ]);
+      if (cfgRes.error) throw cfgRes.error;
+      if (fbRes.error) throw fbRes.error;
+      if (posRes.error) throw posRes.error;
+      if (onRes.error) throw onRes.error;
+
+      const remoteFb = fbRes.data || [];
+      const remotePos = posRes.data || [];
+      const remoteOn = onRes.data || [];
+      const hasRemote =
+        !!cfgRes.data || remoteFb.length > 0 || remotePos.length > 0 || remoteOn.length > 0;
+      if (!hasRemote) {
+        lastCloudPullAt = Date.now();
+        return { ok: true, empty: true };
+      }
+
+      const db = await openDb();
+      await clearObjectStore(db, "items");
+      if (db.objectStoreNames.contains("positiveItems")) await clearObjectStore(db, "positiveItems");
+      if (db.objectStoreNames.contains("otherNeeds")) await clearObjectStore(db, "otherNeeds");
+
+      if (cfgRes.data) {
+        await putConfigDocLocal(db, {
+          id: CONFIG_KEY,
+          categories: Array.isArray(cfgRes.data.categories)
+            ? cfgRes.data.categories
+            : defaultConfigBody().categories,
+          settings:
+            cfgRes.data.settings && typeof cfgRes.data.settings === "object"
+              ? cfgRes.data.settings
+              : defaultConfigBody().settings,
+        });
+      }
+
+      for (const row of remoteFb) {
+        if (row && row.id) await putItemLocal(db, rowToFeedback(row));
+      }
+      if (db.objectStoreNames.contains("positiveItems")) {
+        for (const row of remotePos) {
+          if (row && row.id) await putPositiveItemLocal(db, rowToPositive(row));
+        }
+      }
+      if (db.objectStoreNames.contains("otherNeeds")) {
+        for (const row of remoteOn) {
+          if (row && row.id) await putOtherNeedLocal(db, rowToOther(row));
+        }
+      }
+
+      lastCloudPullAt = Date.now();
+      if (opts.notify) toast("已从云端加载数据");
+      return {
+        ok: true,
+        counts: {
+          feedback: remoteFb.length,
+          positive: remotePos.length,
+          otherNeeds: remoteOn.length,
+          config: cfgRes.data ? 1 : 0,
+        },
+      };
+    } catch (e) {
+      console.warn("pullCloudIntoLocal failed", e);
+      if (isAuthError(e)) {
+        await handleAuthFailure(e);
+        return { ok: false, error: e, auth: true };
+      }
+      if (opts.notifyError) toastCloudErr(e);
+      return { ok: false, error: e };
+    } finally {
+      cloudPullBusy = false;
+    }
+  }
+
+
   function scheduleBoardMasonry() {
     const board = document.getElementById("view-board");
     const grid = document.getElementById("grid");
@@ -195,8 +607,13 @@
     });
   }
 
-  async function putConfigDoc(db, doc) {
+  async function putConfigDocLocal(db, doc) {
     return idbTx(db, ["config"], "readwrite", (tx) => tx.objectStore("config").put(doc));
+  }
+
+  async function putConfigDoc(db, doc) {
+    await putConfigDocLocal(db, doc);
+    await cloudAfterLocal(() => cloudUpsertConfig(doc));
   }
 
   async function getAllItems(db) {
@@ -208,12 +625,18 @@
     });
   }
 
-  async function putItem(db, item) {
+  async function putItemLocal(db, item) {
     return idbTx(db, ["items"], "readwrite", (tx) => tx.objectStore("items").put(item));
   }
 
+  async function putItem(db, item) {
+    await putItemLocal(db, item);
+    await cloudAfterLocal(() => cloudUpsertFeedback(item));
+  }
+
   async function deleteItem(db, id) {
-    return idbTx(db, ["items"], "readwrite", (tx) => tx.objectStore("items").delete(id));
+    await idbTx(db, ["items"], "readwrite", (tx) => tx.objectStore("items").delete(id));
+    await cloudAfterLocal(() => cloudDeleteFeedback(id));
   }
 
   async function getAllPositive(db) {
@@ -225,12 +648,18 @@
     });
   }
 
-  async function putPositiveItem(db, item) {
+  async function putPositiveItemLocal(db, item) {
     return idbTx(db, ["positiveItems"], "readwrite", (tx) => tx.objectStore("positiveItems").put(item));
   }
 
+  async function putPositiveItem(db, item) {
+    await putPositiveItemLocal(db, item);
+    await cloudAfterLocal(() => cloudUpsertPositive(item));
+  }
+
   async function deletePositiveItem(db, id) {
-    return idbTx(db, ["positiveItems"], "readwrite", (tx) => tx.objectStore("positiveItems").delete(id));
+    await idbTx(db, ["positiveItems"], "readwrite", (tx) => tx.objectStore("positiveItems").delete(id));
+    await cloudAfterLocal(() => cloudDeletePositive(id));
   }
 
   async function getAllOtherNeeds(db) {
@@ -242,12 +671,18 @@
     });
   }
 
-  async function putOtherNeed(db, row) {
+  async function putOtherNeedLocal(db, row) {
     return idbTx(db, ["otherNeeds"], "readwrite", (tx) => tx.objectStore("otherNeeds").put(row));
   }
 
+  async function putOtherNeed(db, row) {
+    await putOtherNeedLocal(db, row);
+    await cloudAfterLocal(() => cloudUpsertOther(row));
+  }
+
   async function deleteOtherNeed(db, id) {
-    return idbTx(db, ["otherNeeds"], "readwrite", (tx) => tx.objectStore("otherNeeds").delete(id));
+    await idbTx(db, ["otherNeeds"], "readwrite", (tx) => tx.objectStore("otherNeeds").delete(id));
+    await cloudAfterLocal(() => cloudDeleteOther(id));
   }
 
   async function clearObjectStore(db, storeName) {
@@ -324,7 +759,7 @@
     const replace = mode === "replace";
     if (replace) {
       const ok = confirm(
-        "覆盖导入将清空当前浏览器中的全部反馈、正向反馈、其他需求与分类设置，然后写入备份。确定继续？"
+        "覆盖导入将清空当前浏览器与云端中的全部反馈、正向反馈、其他需求与分类设置，然后写入备份。确定继续？"
       );
       if (!ok) return { cancelled: true };
     }
@@ -340,7 +775,7 @@
     }
 
     const cfg = payload.config;
-    await putConfigDoc(db, {
+    await putConfigDocLocal(db, {
       id: CONFIG_KEY,
       categories: Array.isArray(cfg.categories) ? cfg.categories : defaultConfigBody().categories,
       settings: cfg.settings && typeof cfg.settings === "object" ? cfg.settings : defaultConfigBody().settings,
@@ -351,20 +786,29 @@
     const other = Array.isArray(payload.otherNeeds) ? payload.otherNeeds : [];
 
     for (const item of feedback) {
-      if (item && item.id) await putItem(db, item);
+      if (item && item.id) await putItemLocal(db, item);
     }
     if (db.objectStoreNames.contains("positiveItems")) {
       for (const p of positive) {
-        if (p && p.id) await putPositiveItem(db, p);
+        if (p && p.id) await putPositiveItemLocal(db, p);
       }
     }
     if (db.objectStoreNames.contains("otherNeeds")) {
       for (const o of other) {
-        if (o && o.id) await putOtherNeed(db, o);
+        if (o && o.id) await putOtherNeedLocal(db, o);
       }
     }
 
     await loadState();
+
+    try {
+      if (replace) await cloudClearAllTables();
+      await cloudPushAllFromLocal(db);
+      toastCloudOk();
+    } catch (e) {
+      toastCloudErr(e);
+    }
+
     return {
       cancelled: false,
       counts: { feedback: feedback.length, positive: positive.length, otherNeeds: other.length },
@@ -431,15 +875,15 @@
     if (!doc) {
       const d = defaultConfigBody();
       doc = { id: CONFIG_KEY, categories: d.categories, settings: d.settings };
-      await putConfigDoc(db, doc);
+      await putConfigDocLocal(db, doc);
     } else {
       if (!doc.categories || !doc.categories.length) {
         doc.categories = defaultConfigBody().categories;
-        await putConfigDoc(db, doc);
+        await putConfigDocLocal(db, doc);
       }
       if (!doc.settings) {
         doc.settings = defaultConfigBody().settings;
-        await putConfigDoc(db, doc);
+        await putConfigDocLocal(db, doc);
       }
       let migrated = false;
       doc.categories = doc.categories.map((c, i) => {
@@ -458,7 +902,7 @@
           createdAt: new Date(2000, 0, 1 + legacy).toISOString(),
         };
       });
-      if (migrated) await putConfigDoc(db, doc);
+      if (migrated) await putConfigDocLocal(db, doc);
     }
     if (doc && doc.settings) {
       let patch = false;
@@ -474,7 +918,7 @@
         doc.settings.boardGroupByCategory = false;
         patch = true;
       }
-      if (patch) await putConfigDoc(db, doc);
+      if (patch) await putConfigDocLocal(db, doc);
     }
     return doc;
   }
@@ -929,6 +1373,9 @@
     pollTimer = setInterval(() => {
       (async () => {
         try {
+          if (Date.now() - lastCloudPullAt > 12000) {
+            await pullCloudIntoLocal();
+          }
           await loadState();
           if (document.getElementById("view-board").classList.contains("active")) {
             applyTheme();
@@ -1818,15 +2265,81 @@
 
   window.addEventListener("hashchange", applyHash);
 
+  async function doLogin(email, password) {
+    const sb = getSupabase();
+    if (!sb) throw new Error("未配置 Supabase，请检查 config.js");
+    const { data, error } = await sb.auth.signInWithPassword({
+      email: String(email || "").trim(),
+      password: String(password || ""),
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  async function doLogout() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    appReady = false;
+    try {
+      const sb = getSupabase();
+      if (sb) await sb.auth.signOut();
+    } catch (e) {
+      console.warn("signOut", e);
+    }
+    showLoginGate();
+    toast("已退出登录");
+  }
+
+  function bindAuthControls() {
+    const form = document.getElementById("loginForm");
+    if (form) {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const emailEl = document.getElementById("loginEmail");
+        const passEl = document.getElementById("loginPassword");
+        const btn = document.getElementById("loginSubmit");
+        const email = emailEl ? emailEl.value : "";
+        const password = passEl ? passEl.value : "";
+        setLoginError("");
+        if (btn) btn.disabled = true;
+        try {
+          await doLogin(email, password);
+          const ok = await enterAppAfterAuth({ notifyPull: true });
+          if (ok) toast("登录成功");
+        } catch (err) {
+          const msg =
+            (err && (err.message || err.error_description)) ||
+            "登录失败，请检查邮箱与密码";
+          setLoginError(String(msg));
+          toast("登录失败");
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      });
+    }
+    const logoutBtn = document.getElementById("btnLogout");
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", () => {
+        doLogout();
+      });
+    }
+  }
+
+  bindAuthControls();
+
   openDb()
-    .then(() => loadState())
-    .then(() => {
-      renderAdminFromState();
-      bindSettingsAutoSave();
-      bindDataBackupControls();
-      bindBoardToolbar();
-      bindImageLightbox();
-      applyHash();
+    .then(async () => {
+      const session = await getSession();
+      if (!session) {
+        showLoginGate();
+        return;
+      }
+      await enterAppAfterAuth({ notifyPull: true });
     })
-    .catch((e) => toast("无法打开本地数据库：" + (e.message || String(e))));
+    .catch((e) => {
+      showLoginGate();
+      toast("无法打开本地数据库：" + (e.message || String(e)));
+    });
 })();

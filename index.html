@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <link rel="icon" href="./logo.svg" type="image/svg+xml" />
   </head>
-  <body class="board-in-page">
+  <body class="board-in-page app-locked">
     <header class="top">
       <a class="top-brand" href="#admin" id="brandHome" title="返回管理">
         <img class="top-brand-logo" src="./logo.svg" width="40" height="40" alt="" />
@@ -19,6 +19,7 @@
       <nav>
         <button type="button" class="btn active-tab" id="tabAdmin" data-view="admin">管理</button>
         <button type="button" class="btn" id="tabBoard" data-view="board">展示大屏</button>
+        <button type="button" class="btn btn-ghost" id="btnLogout" title="退出登录">退出登录</button>
       </nav>
     </header>
 
@@ -199,7 +200,7 @@
           <section class="panel data-backup-panel">
             <h2>数据备份与迁移</h2>
             <p class="muted data-backup-hint">
-              反馈、截图、分类等保存在<strong>当前浏览器</strong>的 IndexedDB 里，不在项目文件夹中。换网址（如 GitHub Pages）或换浏览器会看不到旧数据，请先用本机<strong>导出</strong>，再在目标页面<strong>导入</strong>。
+              本页已接 Supabase：打开时自动拉取云端数据，保存后自动同步。本地 IndexedDB 仅作缓存。仍可用导出/导入做备份；覆盖导入会同步清空并重写云端。
             </p>
             <div class="row data-backup-actions">
               <button type="button" class="btn btn-primary" id="btnExportData">导出全部数据（JSON）</button>
@@ -269,7 +270,34 @@
       </div>
     </div>
 
+
+    <div id="loginGate" class="login-gate" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="login-card">
+        <div class="login-brand">
+          <img src="./logo.svg" width="48" height="48" alt="" />
+          <div>
+            <h1 id="loginTitle" class="login-title">聚典核校反馈大屏</h1>
+            <p class="login-sub muted">登录后查看与编辑云端数据</p>
+          </div>
+        </div>
+        <form id="loginForm" class="login-form" autocomplete="on">
+          <label class="field">
+            邮箱
+            <input type="email" id="loginEmail" name="email" value="623206828@qq.com" required autocomplete="username" />
+          </label>
+          <label class="field">
+            密码
+            <input type="password" id="loginPassword" name="password" value="" required autocomplete="current-password" placeholder="请输入密码" />
+          </label>
+          <p id="loginError" class="login-error" hidden></p>
+          <button type="submit" class="btn btn-primary login-submit" id="loginSubmit">登录</button>
+        </form>
+      </div>
+    </div>
+
     <div id="toast" class="toast"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="./config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
