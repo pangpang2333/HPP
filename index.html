@@ -199,7 +199,7 @@
           <section class="panel data-backup-panel">
             <h2>数据备份与迁移</h2>
             <p class="muted data-backup-hint">
-              反馈、截图、分类等保存在<strong>当前浏览器</strong>的 IndexedDB 里，不在项目文件夹中。换网址（如 GitHub Pages）或换浏览器会看不到旧数据，请先用本机<strong>导出</strong>，再在目标页面<strong>导入</strong>。
+              本页已接 Supabase：打开时自动拉取云端数据，保存后自动同步。本地 IndexedDB 仅作缓存。仍可用导出/导入做备份；覆盖导入会同步清空并重写云端。
             </p>
             <div class="row data-backup-actions">
               <button type="button" class="btn btn-primary" id="btnExportData">导出全部数据（JSON）</button>
@@ -270,6 +270,8 @@
     </div>
 
     <div id="toast" class="toast"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="./config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
