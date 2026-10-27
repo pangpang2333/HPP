@@ -200,7 +200,9 @@
           <section class="panel data-backup-panel">
             <h2>数据备份与迁移</h2>
             <p class="muted data-backup-hint">
-              本页已接 Supabase：打开时自动拉取云端数据，保存后自动同步。本地 IndexedDB 仅作缓存。仍可用导出/导入做备份；覆盖导入会同步清空并重写云端。
+              本站为<strong>纯静态</strong>部署：所有人输口令后都会加载仓库内的
+              <code>shared-data.json</code>（当前共享数据包）。本机编辑只保存在当前浏览器；若要更新「大家看到的内容」，请导出 JSON 后替换仓库里的
+              <code>shared-data.json</code> 并重新发布。
             </p>
             <div class="row data-backup-actions">
               <button type="button" class="btn btn-primary" id="btnExportData">导出全部数据（JSON）</button>
@@ -292,7 +294,6 @@
     </div>
 
     <div id="toast" class="toast"></div>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <script src="./config.js"></script>
     <script src="./app.js"></script>
   </body>

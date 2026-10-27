@@ -63,24 +63,17 @@
   let boardToolbarTimer = null;
 
 
-  // ---- Supabase cloud sync (IndexedDB remains local cache) ----
-  let supabaseClient = null;
-  let cloudPullBusy = false;
-  let cloudToastTimer = null;
-  let lastCloudPullAt = 0;
+  // ---- Static shared snapshot (no cloud backend) ----
+  let sharedLoadBusy = false;
+  let lastSharedLoadAt = 0;
+
+  function dashConfig() {
+    return window.FEEDBACK_DASH_CONFIG || window.FEEDBACK_DASH_SUPABASE || {};
+  }
 
   function getSupabase() {
-    if (supabaseClient) return supabaseClient;
-    const cfg = window.FEEDBACK_DASH_SUPABASE || {};
-    if (!cfg.url || !cfg.anonKey) return null;
-    if (!window.supabase || typeof window.supabase.createClient !== "function") return null;
-    try {
-      supabaseClient = window.supabase.createClient(cfg.url, cfg.anonKey);
-    } catch (e) {
-      console.warn("supabase init failed", e);
-      return null;
-    }
-    return supabaseClient;
+    // 已改为纯静态部署，不再连接云端
+    return null;
   }
 
 
@@ -88,7 +81,7 @@
   const GATE_STORAGE_KEY = "hpp-page-gate";
 
   function configuredPagePass() {
-    const cfg = window.FEEDBACK_DASH_SUPABASE || {};
+    const cfg = dashConfig();
     return String(cfg.pagePass || "").trim();
   }
 
@@ -174,10 +167,10 @@
   async function enterAppAfterAuth(opts) {
     opts = opts || {};
     hideLoginGate();
-    const pull = await pullCloudIntoLocal({ notify: !!opts.notifyPull });
+    const pull = await loadSharedSnapshot({ notify: !!opts.notifyPull });
     if (!pull.ok && !pull.skipped && !pull.busy) {
-      console.warn("startup cloud pull failed, using local cache", pull.error);
-      if (opts.notifyPull) toast("云端暂时不可用，已使用本地缓存");
+      console.warn("shared-data load failed, using local cache", pull.error);
+      if (opts.notifyPull) toast("共享数据加载失败，已使用本机缓存");
     }
     await loadState();
     renderAdminFromState();
@@ -195,7 +188,7 @@
 
   function toastCloudOk() {
     clearTimeout(cloudToastTimer);
-    cloudToastTimer = setTimeout(() => toast("已同步到云端"), 350);
+    cloudToastTimer = setTimeout(() => toast("已保存到本机"), 350);
   }
 
   function toastCloudErr(err) {
@@ -371,32 +364,20 @@
     }
   }
 
-  async function pullCloudIntoLocal(opts) {
+  async function loadSharedSnapshot(opts) {
     opts = opts || {};
-    const sb = getSupabase();
-    if (!sb) return { ok: false, skipped: true };
-    if (cloudPullBusy) return { ok: false, busy: true };
-    cloudPullBusy = true;
-    try {
-      const [cfgRes, fbRes, posRes, onRes] = await Promise.all([
-        sb.from("dashboard_config").select("id,categories,settings").eq("id", "default").maybeSingle(),
-        sb.from("feedback_items").select("id,image_data_url,category_id,note,created_at,resolve_status"),
-        sb.from("positive_feedback").select("id,image_data_url,note,created_at"),
-        sb.from("other_needs").select("id,need_type,need_content,solution,created_at"),
-      ]);
-      if (cfgRes.error) throw cfgRes.error;
-      if (fbRes.error) throw fbRes.error;
-      if (posRes.error) throw posRes.error;
-      if (onRes.error) throw onRes.error;
+    if (sharedLoadBusy) return { ok: false, busy: true };
+    const cfg = dashConfig();
+    const url = String(cfg.sharedDataUrl || "./shared-data.json").trim();
+    if (!url) return { ok: false, skipped: true };
 
-      const remoteFb = fbRes.data || [];
-      const remotePos = posRes.data || [];
-      const remoteOn = onRes.data || [];
-      const hasRemote =
-        !!cfgRes.data || remoteFb.length > 0 || remotePos.length > 0 || remoteOn.length > 0;
-      if (!hasRemote) {
-        lastCloudPullAt = Date.now();
-        return { ok: true, empty: true };
+    sharedLoadBusy = true;
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error("无法加载共享数据（HTTP " + res.status + "）");
+      const payload = await res.json();
+      if (!payload || payload.format !== BACKUP_FORMAT) {
+        throw new Error("shared-data.json 格式不正确");
       }
 
       const db = await openDb();
@@ -404,53 +385,62 @@
       if (db.objectStoreNames.contains("positiveItems")) await clearObjectStore(db, "positiveItems");
       if (db.objectStoreNames.contains("otherNeeds")) await clearObjectStore(db, "otherNeeds");
 
-      if (cfgRes.data) {
-        await putConfigDocLocal(db, {
-          id: CONFIG_KEY,
-          categories: Array.isArray(cfgRes.data.categories)
-            ? cfgRes.data.categories
-            : defaultConfigBody().categories,
-          settings:
-            cfgRes.data.settings && typeof cfgRes.data.settings === "object"
-              ? cfgRes.data.settings
-              : defaultConfigBody().settings,
-        });
-      }
+      const conf = payload.config || {};
+      await putConfigDocLocal(db, {
+        id: CONFIG_KEY,
+        categories: Array.isArray(conf.categories) ? conf.categories : defaultConfigBody().categories,
+        settings:
+          conf.settings && typeof conf.settings === "object"
+            ? conf.settings
+            : defaultConfigBody().settings,
+      });
 
-      for (const row of remoteFb) {
-        if (row && row.id) await putItemLocal(db, rowToFeedback(row));
+      const feedback = Array.isArray(payload.feedback) ? payload.feedback : [];
+      const positive = Array.isArray(payload.positiveFeedback) ? payload.positiveFeedback : [];
+      const other = Array.isArray(payload.otherNeeds) ? payload.otherNeeds : [];
+
+      for (const item of feedback) {
+        if (item && item.id) await putItemLocal(db, item);
       }
       if (db.objectStoreNames.contains("positiveItems")) {
-        for (const row of remotePos) {
-          if (row && row.id) await putPositiveItemLocal(db, rowToPositive(row));
+        for (const p of positive) {
+          if (p && p.id) await putPositiveItemLocal(db, p);
         }
       }
       if (db.objectStoreNames.contains("otherNeeds")) {
-        for (const row of remoteOn) {
-          if (row && row.id) await putOtherNeedLocal(db, rowToOther(row));
+        for (const o of other) {
+          if (o && o.id) await putOtherNeedLocal(db, o);
         }
       }
 
-      lastCloudPullAt = Date.now();
-      if (opts.notify) toast("已从云端加载数据");
+      lastSharedLoadAt = Date.now();
+      if (opts.notify) {
+        toast(
+          "已加载共享数据：反馈 " +
+            feedback.length +
+            " 条，正向 " +
+            positive.length +
+            " 条，其他需求 " +
+            other.length +
+            " 条"
+        );
+      }
       return {
         ok: true,
         counts: {
-          feedback: remoteFb.length,
-          positive: remotePos.length,
-          otherNeeds: remoteOn.length,
-          config: cfgRes.data ? 1 : 0,
+          feedback: feedback.length,
+          positive: positive.length,
+          otherNeeds: other.length,
         },
       };
     } catch (e) {
-      console.warn("pullCloudIntoLocal failed", e);
-      if (opts.notifyError) toastCloudErr(e);
+      console.warn("loadSharedSnapshot failed", e);
+      if (opts.notifyError) toast(String((e && e.message) || e));
       return { ok: false, error: e };
     } finally {
-      cloudPullBusy = false;
+      sharedLoadBusy = false;
     }
   }
-
 
   function scheduleBoardMasonry() {
     const board = document.getElementById("view-board");
@@ -737,7 +727,7 @@
     const replace = mode === "replace";
     if (replace) {
       const ok = confirm(
-        "覆盖导入将清空当前浏览器与云端中的全部反馈、正向反馈、其他需求与分类设置，然后写入备份。确定继续？"
+        "覆盖导入将清空当前浏览器中的全部反馈、正向反馈、其他需求与分类设置，然后写入备份。确定继续？"
       );
       if (!ok) return { cancelled: true };
     }
@@ -1351,9 +1341,6 @@
     pollTimer = setInterval(() => {
       (async () => {
         try {
-          if (Date.now() - lastCloudPullAt > 12000) {
-            await pullCloudIntoLocal();
-          }
           await loadState();
           if (document.getElementById("view-board").classList.contains("active")) {
             applyTheme();

@@ -22,7 +22,7 @@ jobs:
       - name: 打包静态站点
         run: |
           mkdir -p public
-          cp index.html app.js styles.css logo.svg config.js .nojekyll public/
+          cp index.html app.js styles.css logo.svg config.js shared-data.json .nojekyll public/
           touch public/.nojekyll
 
       - name: 发布到 gh-pages 分支
