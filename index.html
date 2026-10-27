@@ -19,7 +19,7 @@
       <nav>
         <button type="button" class="btn active-tab" id="tabAdmin" data-view="admin">管理</button>
         <button type="button" class="btn" id="tabBoard" data-view="board">展示大屏</button>
-        <button type="button" class="btn btn-ghost" id="btnLogout" title="退出登录">退出登录</button>
+        <button type="button" class="btn btn-ghost" id="btnLogout" title="锁定页面">锁定</button>
       </nav>
     </header>
 
@@ -277,20 +277,16 @@
           <img src="./logo.svg" width="48" height="48" alt="" />
           <div>
             <h1 id="loginTitle" class="login-title">聚典核校反馈大屏</h1>
-            <p class="login-sub muted">登录后查看与编辑云端数据</p>
+            <p class="login-sub muted">输入口令后查看与编辑</p>
           </div>
         </div>
-        <form id="loginForm" class="login-form" autocomplete="on">
+        <form id="loginForm" class="login-form" autocomplete="off">
           <label class="field">
-            邮箱
-            <input type="email" id="loginEmail" name="email" value="623206828@qq.com" required autocomplete="username" />
-          </label>
-          <label class="field">
-            密码
-            <input type="password" id="loginPassword" name="password" value="" required autocomplete="current-password" placeholder="请输入密码" />
+            口令
+            <input type="password" id="loginPassword" name="page-pass" value="" required autocomplete="off" placeholder="请输入口令" />
           </label>
           <p id="loginError" class="login-error" hidden></p>
-          <button type="submit" class="btn btn-primary login-submit" id="loginSubmit">登录</button>
+          <button type="submit" class="btn btn-primary login-submit" id="loginSubmit">进入</button>
         </form>
       </div>
     </div>

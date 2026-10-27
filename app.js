@@ -85,24 +85,54 @@
 
 
   let appReady = false;
-  let authForcedOut = false;
+  const GATE_STORAGE_KEY = "hpp-page-gate";
 
-  function isAuthError(err) {
-    if (!err) return false;
-    const status = err.status || err.statusCode || err.code;
-    const msg = String(
-      err.message || err.error_description || err.details || err.hint || err.error || ""
-    ).toLowerCase();
-    if (status === 401 || status === "401" || status === 403 || status === "403") return true;
-    if (status === "PGRST301") return true;
-    if (
-      /jwt|unauthorized|not authenticated|session|login required|expired|invalid claim|permission denied|row-level security|rls/.test(
-        msg
-      )
-    ) {
-      return true;
+  function configuredPagePass() {
+    const cfg = window.FEEDBACK_DASH_SUPABASE || {};
+    return String(cfg.pagePass || "").trim();
+  }
+
+  function passEqual(a, b) {
+    const x = String(a);
+    const y = String(b);
+    if (!y || x.length !== y.length) return false;
+    let diff = 0;
+    for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+    return diff === 0;
+  }
+
+  async function passToken(pass) {
+    const text = "hpp-gate:" + String(pass || "");
+    if (!window.crypto || !crypto.subtle) return text;
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async function gateRemembered() {
+    const expected = configuredPagePass();
+    if (!expected) return false;
+    let saved = "";
+    try {
+      saved = sessionStorage.getItem(GATE_STORAGE_KEY) || "";
+    } catch (_) {
+      return false;
     }
-    return false;
+    if (!saved) return false;
+    return saved === (await passToken(expected));
+  }
+
+  async function rememberGate() {
+    try {
+      sessionStorage.setItem(GATE_STORAGE_KEY, await passToken(configuredPagePass()));
+    } catch (_) {}
+  }
+
+  function forgetGate() {
+    try {
+      sessionStorage.removeItem(GATE_STORAGE_KEY);
+    } catch (_) {}
   }
 
   function setLoginError(msg) {
@@ -139,42 +169,6 @@
     setLoginError("");
   }
 
-  async function getSession() {
-    const sb = getSupabase();
-    if (!sb) return null;
-    try {
-      const { data, error } = await sb.auth.getSession();
-      if (error) {
-        console.warn("getSession error", error);
-        return null;
-      }
-      return data && data.session ? data.session : null;
-    } catch (e) {
-      console.warn("getSession failed", e);
-      return null;
-    }
-  }
-
-  async function handleAuthFailure(err) {
-    if (authForcedOut) return;
-    authForcedOut = true;
-    const msg = err && (err.message || err.error_description || String(err));
-    toast("登录已失效，请重新登录" + (msg ? "：" + msg : ""));
-    try {
-      const sb = getSupabase();
-      if (sb) await sb.auth.signOut();
-    } catch (_) {}
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-    appReady = false;
-    showLoginGate();
-    setTimeout(() => {
-      authForcedOut = false;
-    }, 800);
-  }
-
   let uiControlsBound = false;
 
   async function enterAppAfterAuth(opts) {
@@ -182,10 +176,6 @@
     hideLoginGate();
     const pull = await pullCloudIntoLocal({ notify: !!opts.notifyPull });
     if (!pull.ok && !pull.skipped && !pull.busy) {
-      if (isAuthError(pull.error)) {
-        await handleAuthFailure(pull.error);
-        return false;
-      }
       console.warn("startup cloud pull failed, using local cache", pull.error);
       if (opts.notifyPull) toast("云端暂时不可用，已使用本地缓存");
     }
@@ -209,10 +199,6 @@
   }
 
   function toastCloudErr(err) {
-    if (isAuthError(err)) {
-      handleAuthFailure(err);
-      return;
-    }
     const msg = err && (err.message || err.error_description || err.details || String(err));
     toast("云端同步失败：" + msg);
     console.warn("cloud sync error", err);
@@ -340,10 +326,6 @@
       await fn();
       toastCloudOk();
     } catch (e) {
-      if (isAuthError(e)) {
-        await handleAuthFailure(e);
-        return;
-      }
       toastCloudErr(e);
     }
   }
@@ -462,10 +444,6 @@
       };
     } catch (e) {
       console.warn("pullCloudIntoLocal failed", e);
-      if (isAuthError(e)) {
-        await handleAuthFailure(e);
-        return { ok: false, error: e, auth: true };
-      }
       if (opts.notifyError) toastCloudErr(e);
       return { ok: false, error: e };
     } finally {
@@ -2265,31 +2243,15 @@
 
   window.addEventListener("hashchange", applyHash);
 
-  async function doLogin(email, password) {
-    const sb = getSupabase();
-    if (!sb) throw new Error("未配置 Supabase，请检查 config.js");
-    const { data, error } = await sb.auth.signInWithPassword({
-      email: String(email || "").trim(),
-      password: String(password || ""),
-    });
-    if (error) throw error;
-    return data;
-  }
-
-  async function doLogout() {
+  function lockPage() {
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
     }
     appReady = false;
-    try {
-      const sb = getSupabase();
-      if (sb) await sb.auth.signOut();
-    } catch (e) {
-      console.warn("signOut", e);
-    }
+    forgetGate();
     showLoginGate();
-    toast("已退出登录");
+    toast("已锁定");
   }
 
   function bindAuthControls() {
@@ -2297,23 +2259,29 @@
     if (form) {
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const emailEl = document.getElementById("loginEmail");
         const passEl = document.getElementById("loginPassword");
         const btn = document.getElementById("loginSubmit");
-        const email = emailEl ? emailEl.value : "";
-        const password = passEl ? passEl.value : "";
+        const password = passEl ? String(passEl.value || "").trim() : "";
+        const expected = configuredPagePass();
         setLoginError("");
+        if (!expected) {
+          setLoginError("未配置页面口令，请检查 config.js");
+          return;
+        }
+        if (!passEqual(password, expected)) {
+          setLoginError("口令不正确");
+          toast("口令不正确");
+          return;
+        }
         if (btn) btn.disabled = true;
         try {
-          await doLogin(email, password);
+          await rememberGate();
           const ok = await enterAppAfterAuth({ notifyPull: true });
-          if (ok) toast("登录成功");
+          if (ok) toast("已进入");
         } catch (err) {
-          const msg =
-            (err && (err.message || err.error_description)) ||
-            "登录失败，请检查邮箱与密码";
+          const msg = (err && err.message) || "无法进入";
           setLoginError(String(msg));
-          toast("登录失败");
+          showLoginGate();
         } finally {
           if (btn) btn.disabled = false;
         }
@@ -2322,7 +2290,7 @@
     const logoutBtn = document.getElementById("btnLogout");
     if (logoutBtn) {
       logoutBtn.addEventListener("click", () => {
-        doLogout();
+        lockPage();
       });
     }
   }
@@ -2331,8 +2299,7 @@
 
   openDb()
     .then(async () => {
-      const session = await getSession();
-      if (!session) {
+      if (!(await gateRemembered())) {
         showLoginGate();
         return;
       }
